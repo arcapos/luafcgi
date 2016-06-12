@@ -1,0 +1,84 @@
+Implementing FastCGI Servers
+----------------------------
+
+The fcgi module is used to implement FastCGI servers, i.e. servers that
+run as daemon processes and that are contacted by a webserver to deliver
+dynamic content.
+
+Creating FastCGI servers
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Before a webserver can connect to a FastCGI server, such a server must
+be created by opening a socket and waiting for connections on it.
+
+openSocket(path, backlog)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Create a FastCGI listen socket. path is the Unix domain socket , or a
+colon followed by a port number. e.g. „/var/run/.s“, „:5000“. backlog is
+the listen queue depth used in the listen() call. Returns the socket’s
+file descriptor or -1 on error.
+
+Handling FastCGI connections
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+accept()
+^^^^^^^^
+
+Accept a new request.
+
+finish()
+^^^^^^^^
+
+Finish the current request.
+
+flush()
+^^^^^^^
+
+Flushes any buffered output. Server-push is a legitimate application of
+flush. Otherwise, flush is not very useful, since accept does it
+implicitly. Calling flush in non-push applications results in extra
+writes and therefore reduces performance.
+
+getLine(count)
+^^^^^^^^^^^^^^
+
+Reads up to count-1 consecutive bytes from the input stream. Stops
+before count-1 bytes have been read if ’\n’ or EOF is read. The
+terminating ’\n’ is copied into the result. After copying the last byte.
+Returns nil if EOF is the first thing read from the input stream, the
+string otherwise.
+
+getStr(count)
+^^^^^^^^^^^^^
+
+Reads up to count consecutive bytes from the input stream. Performs no
+interpretation of the input bytes. Returns the number of bytes read. If
+the result is smaller than count, the end of input has been reached.
+
+getParam(name)
+^^^^^^^^^^^^^^
+
+Obtain the value of an FCGI parameter in the environment.
+
+getEnv()
+^^^^^^^^
+
+Obtain a table containing the environment.
+
+putStr(data)
+^^^^^^^^^^^^
+
+Writes n consecutive bytes from the character array data into the output
+stream. Performs no interpretation of the output bytes. Returns the
+number of bytes written (n) for normal return, -1 if an error occurred.
+
+Convenience Functions
+~~~~~~~~~~~~~~~~~~~~~
+
+parse()
+^^^^^^^
+
+Parse the current query (i.e. the contents of the QUERY_STRING variable)
+and return a table containing all variables such that the variable name
+is the key.
