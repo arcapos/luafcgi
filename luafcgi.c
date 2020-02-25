@@ -232,21 +232,6 @@ fcgi_parse(lua_State *L)
 	return 1;
 }
 
-static void
-fcgi_set_info(lua_State *L)
-{
-	lua_pushliteral(L, "_COPYRIGHT");
-	lua_pushliteral(L, "Copyright (C) 2013 - 2020 "
-		"micro systems marc balmer");
-	lua_settable(L, -3);
-	lua_pushliteral(L, "_DESCRIPTION");
-	lua_pushliteral(L, "FastCGI interface for Lua");
-	lua_settable(L, -3);
-	lua_pushliteral(L, "_VERSION");
-	lua_pushliteral(L, "fcgi 1.1.0");
-	lua_settable(L, -3);
-}
-
 int
 luaopen_fcgi(lua_State* L)
 {
@@ -267,11 +252,18 @@ luaopen_fcgi(lua_State* L)
 		{ NULL,		NULL }
 	};
 
-#if LUA_VERSION_NUM >= 502
 	luaL_newlib(L, methods);
-#else
-	luaL_register(L, "fcgi", methods);
-#endif
-	fcgi_set_info(L);
+
+	lua_pushliteral(L, "_COPYRIGHT");
+	lua_pushliteral(L, "Copyright (C) 2013 - 2020 "
+		"micro systems marc balmer");
+	lua_settable(L, -3);
+	lua_pushliteral(L, "_DESCRIPTION");
+	lua_pushliteral(L, "FastCGI for Lua");
+	lua_settable(L, -3);
+	lua_pushliteral(L, "_VERSION");
+	lua_pushliteral(L, "fcgi 1.1.0");
+	lua_settable(L, -3);
+
 	return 1;
 }
