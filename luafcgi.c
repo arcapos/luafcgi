@@ -34,41 +34,73 @@
 #include <stdlib.h>
 #include <string.h>
 
-static FCGX_Stream *in, *out, *err;
-static FCGX_ParamArray env;
+#define FCGX_REQUEST_METATABLE	"FastCGI request"
 
+static int
+fcgi_open_socket(lua_State *L)
+{
+	int sock;
+
+	sock = FCGX_OpenSocket(luaL_checkstring(L, 1), luaL_checkinteger(L, 2));
+	lua_pushinteger(L, sock);
+	return 1;
+}
+
+static int
+fcgi_init_request(lua_State *L)
+{
+	FCGX_Request *req;
+	int socket;
+
+	socket = luaL_checkinteger(L, 1);
+
+	req = lua_newuserdata(L, sizeof(FCGX_Request));
+	luaL_setmetatable(L, FCGX_REQUEST_METATABLE);
+	if (FCGX_InitRequest(req, socket, 0))
+		lua_pushnil(L);
+	return 1;
+}
+
+/* Request methods */
 static int
 fcgi_accept(lua_State *L)
 {
-	lua_pushinteger(L, FCGX_Accept(&in, &out, &err, &env));
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
+
+	lua_pushinteger(L, FCGX_Accept_r(req));
 	return 1;
 }
 
 static int
 fcgi_finish(lua_State *L)
 {
-	FCGX_Finish();
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
+
+	FCGX_Finish_r(req);
 	return 0;
 }
 
 static int
-fcgi_flush(lua_State *L)
+fcgi_fflush(lua_State *L)
 {
-	FCGX_FFlush(out);
-	return 0;
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
+
+	lua_pushinteger(L, FCGX_FFlush(req->out));
+	return 1;
 }
 
 static int
 fcgi_get_line(lua_State *L)
 {
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
 	int len;
 	char *str, *p;
 
-	len = luaL_checkinteger(L, 1);
+	len = luaL_checkinteger(L, 2);
 	str = malloc(len + 1);
 	if (str == NULL)
 		return luaL_error(L, "memory error");
-	p = FCGX_GetLine(str, len, in);
+	p = FCGX_GetLine(str, len, req->in);
 	if (p == NULL)
 		lua_pushnil(L);
 	else
@@ -78,31 +110,12 @@ fcgi_get_line(lua_State *L)
 }
 
 static int
-fcgi_get_str(lua_State *L)
-{
-	int len, rc;
-	char *str;
-
-	len = luaL_checkinteger(L, 1);
-	str = malloc(len + 1);
-	if (str == NULL)
-		return luaL_error(L, "memory error");
-	rc = FCGX_GetStr(str, len, in);
-	if (rc == 0)
-		lua_pushnil(L);
-	else
-		lua_pushstring(L, str);
-	lua_pushinteger(L, rc);
-	free(str);
-	return 2;
-}
-
-static int
 fcgi_get_param(lua_State *L)
 {
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
 	char *p;
 
-	p = FCGX_GetParam(luaL_checkstring(L, -1), env);
+	p = FCGX_GetParam(luaL_checkstring(L, 2), req->envp);
 	if (p == NULL)
 		lua_pushnil(L);
 	else
@@ -113,7 +126,9 @@ fcgi_get_param(lua_State *L)
 static int
 fcgi_get_env(lua_State *L)
 {
-	char **p = env;
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
+
+	char **p = req->envp;
 	char *v;
 
 	if (p == NULL)
@@ -133,22 +148,34 @@ fcgi_get_env(lua_State *L)
 }
 
 static int
-fcgi_open_socket(lua_State *L)
+fcgi_get_str(lua_State *L)
 {
-	int sock;
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
+	int len, rc;
+	char *str;
 
-	sock = FCGX_OpenSocket(luaL_checkstring(L, 1), luaL_checkinteger(L, 2));
-	lua_pushinteger(L, sock);
-	return 1;
+	len = luaL_checkinteger(L, 2);
+	str = malloc(len + 1);
+	if (str == NULL)
+		return luaL_error(L, "memory error");
+	rc = FCGX_GetStr(str, len, req->in);
+	if (rc == 0)
+		lua_pushnil(L);
+	else
+		lua_pushstring(L, str);
+	lua_pushinteger(L, rc);
+	free(str);
+	return 2;
 }
 
 static int
 fcgi_put_str(lua_State *L)
 {
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
 	const char *str;
 
-	str = luaL_checkstring(L, 1);
-	lua_pushinteger(L, FCGX_PutStr(str, strlen(str), out));
+	str = luaL_checkstring(L, 2);
+	lua_pushinteger(L, FCGX_PutStr(str, strlen(str), req->out));
 	return 1;
 }
 
@@ -210,11 +237,13 @@ lua_decode_query(lua_State *L, char *query)
 static int
 fcgi_parse(lua_State *L)
 {
+	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
+
 	char *query, *content;
 	int clen, rc;
 
-	query =	FCGX_GetParam("QUERY_STRING", env);
-	clen = atoi(FCGX_GetParam("CONTENT_LENGTH", env));
+	query =	FCGX_GetParam("QUERY_STRING", req->envp);
+	clen = atoi(FCGX_GetParam("CONTENT_LENGTH", req->envp));
 
 	lua_newtable(L);
 	if ((query && *query) || clen > 0) {
@@ -223,7 +252,7 @@ fcgi_parse(lua_State *L)
 
 		if (clen > 0) {
 			content = malloc(clen + 1);
-			rc = FCGX_GetStr(content, clen, in);
+			rc = FCGX_GetStr(content, clen, req->in);
 			content[rc] = '\0';
 			lua_decode_query(L, content);
 			free(content);
@@ -236,21 +265,37 @@ int
 luaopen_fcgi(lua_State* L)
 {
 	static const struct luaL_Reg methods[] = {
-		{ "accept",	fcgi_accept },
-		{ "finish",	fcgi_finish },
-		{ "flush",	fcgi_flush },
-		{ "getLine",	fcgi_get_line },
-		{ "getStr",	fcgi_get_str },
-		{ "getParam",	fcgi_get_param },
-		{ "getEnv",	fcgi_get_env },
-		{ "openSocket",	fcgi_open_socket },
-		{ "putStr",	fcgi_put_str },
+		{ "openSocket",		fcgi_open_socket },
+		{ "initRequest",	fcgi_init_request },
+		{ NULL,			NULL }
+	};
+	static const struct luaL_Reg request_methods[] = {
+		{ "accept",		fcgi_accept },
+		{ "finish",		fcgi_finish },
+		{ "fflush",		fcgi_fflush },
+		{ "getLine",		fcgi_get_line },
+		{ "getParam",		fcgi_get_param },
+		{ "getEnv",		fcgi_get_env },
+		{ "getStr",		fcgi_get_str },
+		{ "putStr",		fcgi_put_str },
 
 		/* Convenience functions */
-		{ "parse",	fcgi_parse },
-
+		{ "parse",		fcgi_parse },
 		{ NULL,		NULL }
 	};
+
+	if (luaL_newmetatable(L, FCGX_REQUEST_METATABLE)) {
+		luaL_setfuncs(L, request_methods, 0);
+
+		lua_pushliteral(L, "__index");
+		lua_pushvalue(L, -2);
+		lua_settable(L, -3);
+
+		lua_pushliteral(L, "__metatable");
+		lua_pushliteral(L, "must not access this metatable");
+		lua_settable(L, -3);
+	}
+	lua_pop(L, 1);
 
 	luaL_newlib(L, methods);
 
@@ -262,8 +307,11 @@ luaopen_fcgi(lua_State* L)
 	lua_pushliteral(L, "FastCGI for Lua");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_VERSION");
-	lua_pushliteral(L, "fcgi 1.1.0");
+	lua_pushliteral(L, "fcgi 1.2.0");
 	lua_settable(L, -3);
+
+	if (FCGX_Init())
+		lua_pushnil(L);
 
 	return 1;
 }
