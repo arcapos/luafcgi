@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 - 2020 Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
+ * Copyright (c) 2013 - 2021 Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -159,6 +159,7 @@ fcgi_get_str(lua_State *L)
 	if (str == NULL)
 		return luaL_error(L, "memory error");
 	rc = FCGX_GetStr(str, len, req->in);
+	str[len] = '\0';
 	if (rc == 0)
 		lua_pushnil(L);
 	else
@@ -173,9 +174,10 @@ fcgi_put_str(lua_State *L)
 {
 	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
 	const char *str;
+	size_t len;
 
-	str = luaL_checkstring(L, 2);
-	lua_pushinteger(L, FCGX_PutStr(str, strlen(str), req->out));
+	str = luaL_checklstring(L, 2, &len);
+	lua_pushinteger(L, FCGX_PutStr(str, len, req->out));
 	return 1;
 }
 
