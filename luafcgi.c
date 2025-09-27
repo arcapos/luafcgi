@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 - 2021 Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
+ * Copyright (c) 2013 - 2025 Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -236,12 +236,138 @@ lua_decode_query(lua_State *L, char *query)
 	}
 }
 
+static char *
+sgets(char **buf, char *to)
+{
+	char *s, *p;
+
+	p = s = *buf;
+	if (*s == '\0')
+		return NULL;
+
+	while (*s && s != to && *s != '\r' && *s != '\n')
+		s++;
+
+	if (*s && *s == '\r')
+		*s++ = '\0';
+	if (*s && *s == '\n')
+		*s++ = '\0';
+	*buf = s;
+	return p;
+}
+
+static void
+lua_decode_part(lua_State *L, char *from, char *to)
+{
+	char *p, *header, *name, *filename, *type, *n;
+
+	name = filename = type = NULL;
+	p = from;
+
+	do {
+		header = sgets(&p, to);
+		if (!strncmp(header, "Content-Disposition:",
+		    strlen("Content-Disposition:"))) {
+			name = strstr(header, "name=\"");
+			if (name == NULL)
+				return;
+			name += strlen("name=\"");
+			for (n = name + 1; *n && *n != '"'; n++)
+				;
+			if (*n == '"')
+				*n++ = '\0';
+
+			filename = strstr(n, "filename=\"");
+			if (filename != NULL) {
+				filename += strlen("filename=\"");
+				for (n = filename + 1; *n && *n != '"'; n++)
+					;
+				if (*n == '"')
+					*n = '\0';
+			}
+		} else if (!strncmp(header, "Content-Type: ",
+		    strlen("Content-Type: "))) {
+			type = header + strlen("Content-Type: ");
+			for (n = type; *n; n++)
+				if (*n == '\r' || *n == '\n')
+					*n = '\0';
+		}
+	} while (strlen(header) && p < to);
+
+	if (name) {
+		if (filename) {
+			lua_newtable(L);
+			lua_pushstring(L, filename);
+			lua_setfield(L, -2, "filename");
+			if (type) {
+				lua_pushstring(L, type);
+				lua_setfield(L, -2, "filetype");
+			}
+			lua_pushlstring(L, p, to - p);
+			lua_setfield(L, -2, "filedata");
+			lua_setfield(L, -2, name);
+		} else {
+			lua_pushlstring(L, p, to - p);
+			lua_setfield(L, -2, name);
+		}
+	}
+}
+
+static void
+lua_decode_multipart(lua_State *L, char *ctype, char *content, int len)
+{
+	char *boundary, *p, *np;
+
+	/*
+	 * We can use strstr here instead of memmem, since the start of
+	 * of the content is actually text.
+	 */
+	boundary = strstr(ctype, "boundary=");
+	if (boundary == NULL)
+		return;
+	else
+		boundary += strlen("boundary=");
+
+	for (p = boundary; *p && *p != '\n' && *p != '\r'; p++)
+		;
+
+	/* Find first boundary */
+	p = strstr(content, boundary);
+	if (p == NULL)
+		return;
+
+	/* Skip past CR/LF */
+	p += strlen(boundary);
+	while (*p == '\n' || *p == '\r')
+		p++;
+
+	while (p) {
+		/*
+		 * We have to use memmem here, since the data part may actually
+		 * be binary data, strstr does not handle correctly.
+		 */
+		np = memmem(p, len - (p - content), boundary, strlen(boundary));
+		if (np) {
+			/*
+			 * boundary is prefixed by --, up to np - 2, also
+			 * take into account the CR/LF
+			 */
+			lua_decode_part(L, p, np - 4);
+
+			/* Skip past CR/LF */
+			np += strlen(boundary);
+			while (*np == '\n' || *np == '\r')
+				np++;
+		}
+		p = np;
+	}
+}
+
 static int
 fcgi_parse(lua_State *L)
 {
 	FCGX_Request *req = luaL_checkudata(L, 1, FCGX_REQUEST_METATABLE);
-
-	char *query, *content;
+	char *query, *ctype, *content;
 	int clen, rc;
 
 	query =	FCGX_GetParam("QUERY_STRING", req->envp);
@@ -254,9 +380,22 @@ fcgi_parse(lua_State *L)
 
 		if (clen > 0) {
 			content = malloc(clen + 1);
+			if (content == NULL)
+				return 1;
+
 			rc = FCGX_GetStr(content, clen, req->in);
 			content[rc] = '\0';
-			lua_decode_query(L, content);
+
+			ctype = FCGX_GetParam("CONTENT_TYPE", req->envp);
+
+			if (!strcmp(ctype, "application/x-www-form-urlencoded"))
+				lua_decode_query(L, content);
+			else {
+				if (!strncmp(ctype, "multipart/form-data;",
+				    strlen("multipart/form-data;")))
+					lua_decode_multipart(L, ctype, content,
+					    clen);
+			}
 			free(content);
 		}
 	}
@@ -302,14 +441,14 @@ luaopen_fcgi(lua_State* L)
 	luaL_newlib(L, methods);
 
 	lua_pushliteral(L, "_COPYRIGHT");
-	lua_pushliteral(L, "Copyright (C) 2013 - 2020 "
+	lua_pushliteral(L, "Copyright (C) 2013 - 2025 "
 		"micro systems marc balmer");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_DESCRIPTION");
 	lua_pushliteral(L, "FastCGI for Lua");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_VERSION");
-	lua_pushliteral(L, "fcgi 1.2.0");
+	lua_pushliteral(L, "fcgi 1.3.0");
 	lua_settable(L, -3);
 
 	if (FCGX_Init())
