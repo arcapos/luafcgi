@@ -20,15 +20,23 @@ while request:accept() == 0 do
 	for k, v in pairs(data) do
 		print('decoded', k .. ':')
 		if type(v) == 'table' then
-			for a, b in pairs(v) do
-				print(a)
-				if a ~= 'filedata' then
-					print(b)
+			-- uploaded files have a __isFile boolean set to true
+			if v.__isFile == true then
+				for a, b in pairs(v) do
+					print(a)
+					if a ~= 'filedata' then
+						print(b)
+					end
+				end
+				local f = io.open(v.filename, 'w')
+				f:write(v.filedata)
+				f:close()
+			else
+				-- not a file, must be a selection multiple
+				for a, b in pairs(v) do
+					print(a, b)
 				end
 			end
-			local f = io.open(v.filename, 'w')
-			f:write(v.filedata)
-			f:close()
 		else
 			print(string.format('%s', v))
 		end
@@ -44,6 +52,11 @@ while request:accept() == 0 do
 	<input type="file" name="imagefile" value="">
 	<input type="text" name="name">
 	<input type="text" name="id">
+	<select multiple name="selection">
+		<option value="a">AAA</option>
+		<option value="b">BBB</option>
+		<option value="c">CCC</option>
+	</select>
 	<input type="submit" value="OK">
 	</form>
 	]])

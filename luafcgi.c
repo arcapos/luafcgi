@@ -219,8 +219,46 @@ lua_url_decode(lua_State *L, char *s)
 		}
 	}
 	*q = '\0';
-	lua_pushstring(L, val);
-	lua_setfield(L, -2, s);
+
+	/*
+	 * Check there already is a field with this name, in the table,  if so,
+	 * convert it to a table and store the existing and new value in that
+	 * table.
+	 */
+	lua_getfield(L, -1, s);
+	if (!lua_isnil(L, -1)) {
+		if (lua_istable(L, -1)) {
+			int len;
+			/* append value to existing table */
+
+			lua_len(L, -1);
+			len = lua_tointeger(L, -1);
+			lua_pop(L, 1);
+			lua_pushinteger(L, len + 1);
+			lua_pushstring(L, val);
+			lua_settable(L, -3);
+
+		} else {
+			/* replace the current value with a table */
+			lua_newtable(L);
+
+			/* push the old value */
+			lua_pushinteger(L, 1);
+			lua_pushvalue(L, -3);
+			lua_settable(L, -3);
+
+			/* push the new value */
+			lua_pushinteger(L, 2);
+			lua_pushstring(L, val);
+			lua_settable(L, -3);
+			lua_setfield(L, -3, s);
+		}
+		lua_pop(L, 1);
+	} else {
+		lua_pop(L, 1);
+		lua_pushstring(L, val);
+		lua_setfield(L, -2, s);
+	}
 	free(val);
 }
 
@@ -297,6 +335,8 @@ lua_decode_part(lua_State *L, char *from, char *to)
 	if (name) {
 		if (filename) {
 			lua_newtable(L);
+			lua_pushboolean(L, 1);
+			lua_setfield(L, -2, "__isFile");
 			lua_pushstring(L, filename);
 			lua_setfield(L, -2, "filename");
 			if (type) {
@@ -307,8 +347,45 @@ lua_decode_part(lua_State *L, char *from, char *to)
 			lua_setfield(L, -2, "filedata");
 			lua_setfield(L, -2, name);
 		} else {
-			lua_pushlstring(L, p, to - p);
-			lua_setfield(L, -2, name);
+			/*
+			 * Check there already is a field with this name, in
+			 * the table,  if so, convert it to a table and store
+			 * the existing and new value
+			 * in that table.
+			 */
+			lua_getfield(L, -1, name);
+			if (!lua_isnil(L, -1)) {
+				if (lua_istable(L, -1)) {
+					int len;
+					/* append value to existing table */
+
+					lua_len(L, -1);
+					len = lua_tointeger(L, -1);
+					lua_pop(L, 1);
+					lua_pushinteger(L, len + 1);
+					lua_pushlstring(L, p, to -p);
+					lua_settable(L, -3);
+
+				} else {
+					lua_newtable(L);
+
+					/* push the old value */
+					lua_pushinteger(L, 1);
+					lua_pushvalue(L, -3);
+					lua_settable(L, -3);
+
+					/* push the new value */
+					lua_pushinteger(L, 2);
+					lua_pushlstring(L, p, to -p);
+					lua_settable(L, -3);
+					lua_setfield(L, -3, name);
+				}
+				lua_pop(L, 1);
+			} else {
+				lua_pop(L, 1);
+				lua_pushlstring(L, p, to - p);
+				lua_setfield(L, -2, name);
+			}
 		}
 	}
 }
@@ -448,7 +525,7 @@ luaopen_fcgi(lua_State* L)
 	lua_pushliteral(L, "FastCGI for Lua");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_VERSION");
-	lua_pushliteral(L, "fcgi 1.3.0");
+	lua_pushliteral(L, "fcgi 1.3.1");
 	lua_settable(L, -3);
 
 	if (FCGX_Init())
